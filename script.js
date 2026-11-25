@@ -510,3 +510,168 @@ algorithm.addEventListener("change", () => {
 
 // Input awal otomatis ditampilkan
 generateInputs();
+
+function runHRN(processes) {
+    let currentTime = 0;
+    let completed = 0;
+
+    let gantt = [];
+    let results = [];
+    let logs = [];
+
+    // Salin data proses agar data asli tidak berubah
+    let data = processes.map((p, index) => ({
+        id: p.id,
+        arrivalTime: Number(p.arrivalTime),
+        burstTime: Number(p.burstTime),
+        index: index,
+        isCompleted: false
+    }));
+
+    while (completed < data.length) {
+
+        // Cari proses yang sudah tiba
+        let readyQueue = data.filter(p =>
+            !p.isCompleted &&
+            p.arrivalTime <= currentTime
+        );
+
+        // Jika belum ada proses yang datang
+        if (readyQueue.length === 0) {
+
+            let nextArrival = Math.min(
+                ...data
+                    .filter(p => !p.isCompleted)
+                    .map(p => p.arrivalTime)
+            );
+
+            gantt.push({
+                id: "IDLE",
+                start: currentTime,
+                end: nextArrival
+            });
+
+            currentTime = nextArrival;
+            continue;
+        }
+
+        // Hitung Response Ratio setiap kandidat
+        let candidates = readyQueue.map(p => {
+
+            let waitingTime = currentTime - p.arrivalTime;
+
+            let responseRatio =
+                (waitingTime + p.burstTime) / p.burstTime;
+
+            return {
+                ...p,
+                waitingTime,
+                responseRatio
+            };
+        });
+
+        // Pilih Response Ratio tertinggi
+        candidates.sort((a, b) => {
+
+            if (Math.abs(
+                b.responseRatio - a.responseRatio
+            ) > 1e-9) {
+                return b.responseRatio - a.responseRatio;
+            }
+
+            if (a.arrivalTime !== b.arrivalTime) {
+                return a.arrivalTime - b.arrivalTime;
+            }
+
+            return a.index - b.index;
+        });
+
+        let selected = candidates[0];
+
+        // Catat proses yang dipilih
+        logs.push({
+            time: currentTime,
+            candidates: candidates.map(p => ({
+                id: p.id,
+                waitingTime: p.waitingTime,
+                burstTime: p.burstTime,
+                responseRatio: p.responseRatio
+            })),
+            selected: selected.id
+        });
+
+        // Eksekusi proses sampai selesai
+        let startTime = currentTime;
+
+        let completionTime =
+            startTime + selected.burstTime;
+
+        let turnaroundTime =
+            completionTime - selected.arrivalTime;
+
+        let waitingTime =
+            turnaroundTime - selected.burstTime;
+
+        let responseTime =
+            startTime - selected.arrivalTime;
+
+        // Simpan hasil perhitungan
+        results.push({
+            id: selected.id,
+            arrivalTime: selected.arrivalTime,
+            burstTime: selected.burstTime,
+            startTime,
+            completionTime,
+            turnaroundTime,
+            waitingTime,
+            responseTime
+        });
+
+        // Simpan Gantt Chart
+        gantt.push({
+            id: selected.id,
+            start: startTime,
+            end: completionTime
+        });
+
+        selected.isCompleted = true;
+
+        currentTime = completionTime;
+        completed++;
+    }
+
+    // Hitung rata-rata
+    let totalWT = results.reduce(
+        (sum, p) => sum + p.waitingTime, 0
+    );
+
+    let totalTAT = results.reduce(
+        (sum, p) => sum + p.turnaroundTime, 0
+    );
+
+    let totalRT = results.reduce(
+        (sum, p) => sum + p.responseTime, 0
+    );
+
+    let totalBurst = data.reduce(
+        (sum, p) => sum + p.burstTime, 0
+    );
+
+    let totalTime = currentTime;
+
+    let averages = {
+        averageWT: totalWT / results.length,
+        averageTAT: totalTAT / results.length,
+        averageRT: totalRT / results.length,
+        throughput: results.length / totalTime,
+        cpuUtilization: (totalBurst / totalTime) * 100
+    };
+
+    return {
+        gantt,
+        results,
+        logs,
+        averages,
+        totalTime
+    };
+}
