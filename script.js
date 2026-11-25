@@ -1,7 +1,6 @@
-
 // ==========================================
 // CPU SCHEDULING SIMULATOR
-// FCFS, SJF, SRTF, dan ROUND ROBIN
+// FCFS, SJF, SRTF, ROUND ROBIN, dan HRN
 // ==========================================
 
 const algorithm = document.getElementById("algorithm");
@@ -15,6 +14,7 @@ const ganttChart = document.getElementById("ganttChart");
 const results = document.getElementById("results");
 const averages = document.getElementById("averages");
 const message = document.getElementById("message");
+const hrnLogs = document.getElementById("hrnLogs");
 
 const colors = [
     "#2563eb",
@@ -152,11 +152,6 @@ function runFCFS(processes) {
         addSegment(chart, p.id, start, time);
         p.ct = time;
     }
-    if (algorithm === "hrn") {
-    const output = runHRN(processes);
-    renderHRN(output);
-    return;
-}
 
     return chart;
 }
@@ -330,7 +325,85 @@ function runRR(processes, tq) {
 }
 
 // ==========================================
-// 8. MENGHITUNG CT, TAT, WT, DAN RT
+// 8. ALGORITMA HRN (NON-PREEMPTIVE)
+//    Response Ratio = (Waiting Time + Burst Time) / Burst Time
+//    Proses dengan RR tertinggi dijalankan lebih dulu.
+// ==========================================
+
+function runHRN(processes, logs) {
+    const chart = [];
+    let time = 0;
+    let completed = 0;
+
+    while (completed < processes.length) {
+
+        // Proses yang sudah tiba dan belum selesai
+        const ready = processes.filter(
+            p => p.at <= time && p.remaining > 0
+        );
+
+        // Jika belum ada yang tiba, CPU Idle
+        if (ready.length === 0) {
+            const nextArrival = Math.min(
+                ...processes
+                    .filter(p => p.remaining > 0)
+                    .map(p => p.at)
+            );
+
+            addSegment(chart, "Idle", time, nextArrival);
+            time = nextArrival;
+            continue;
+        }
+
+        // Hitung Response Ratio tiap kandidat
+        const candidates = ready.map(p => {
+            const waiting = time - p.at;
+            const ratio = (waiting + p.bt) / p.bt;
+
+            return { p, waiting, ratio };
+        });
+
+        // Pilih RR tertinggi; jika sama, AT lebih awal, lalu urutan input
+        candidates.sort((a, b) => {
+            if (Math.abs(a.ratio - b.ratio) > 1e-9) {
+                return b.ratio - a.ratio;
+            }
+
+            return a.p.at - b.p.at || a.p.order - b.p.order;
+        });
+
+        const selected = candidates[0].p;
+
+        // Simpan langkah perhitungan untuk ditampilkan
+        logs.push({
+            time: time,
+            selected: selected.id,
+            candidates: candidates.map(c => ({
+                id: c.p.id,
+                waiting: c.waiting,
+                bt: c.p.bt,
+                ratio: c.ratio
+            }))
+        });
+
+        // Non-preemptive: jalan sampai selesai
+        selected.firstStart = time;
+
+        const start = time;
+        time += selected.bt;
+
+        addSegment(chart, selected.id, start, time);
+
+        selected.remaining = 0;
+        selected.ct = time;
+        completed++;
+    }
+
+    return chart;
+}
+
+// ==========================================
+// 9. MENGHITUNG CT, TAT, WT, DAN RT
 // ==========================================
 
 function calculateMetrics(processes) {
@@ -342,9 +415,8 @@ function calculateMetrics(processes) {
 }
 
 // ==========================================
-// 9. MENAMPILKAN GANTT CHART
+// 10. MENAMPILKAN GANTT CHART
 // ==========================================
-
 
 function displayGantt(chart) {
     ganttChart.innerHTML = "";
@@ -386,7 +458,9 @@ function displayGantt(chart) {
     ganttChart.appendChild(times);
 }
 
-// 10. MENAMPILKAN TABEL HASIL
+// ==========================================
+// 11. MENAMPILKAN TABEL HASIL
+// ==========================================
 
 function displayResults(processes) {
     let html = `
@@ -424,21 +498,13 @@ function displayResults(processes) {
 }
 
 // ==========================================
-// 11. MENAMPILKAN RATA-RATA
+// 12. MENAMPILKAN RATA-RATA
 // ==========================================
 
 function displayAverages(processes) {
-    const totalTAT = processes.reduce(
-        (sum, p) => sum + p.tat, 0
-    );
-
-    const totalWT = processes.reduce(
-        (sum, p) => sum + p.wt, 0
-    );
-
-    const totalRT = processes.reduce(
-        (sum, p) => sum + p.rt, 0
-    );
+    const totalTAT = processes.reduce((sum, p) => sum + p.tat, 0);
+    const totalWT = processes.reduce((sum, p) => sum + p.wt, 0);
+    const totalRT = processes.reduce((sum, p) => sum + p.rt, 0);
 
     const count = processes.length;
 
@@ -458,12 +524,65 @@ function displayAverages(processes) {
 }
 
 // ==========================================
-// 12. MENJALANKAN PERHITUNGAN
+// 13. MENAMPILKAN LOG PERHITUNGAN HRN
+// ==========================================
+
+function displayHRNLogs(logs) {
+    if (!logs || logs.length === 0) {
+        hrnLogs.innerHTML = "";
+        return;
+    }
+
+    let html = "<h3>Langkah Perhitungan HRN</h3>";
+
+    logs.forEach((log, i) => {
+        html += `
+            <div class="hrn-log-card">
+                <h4>Langkah ${i + 1} (waktu = ${log.time})</h4>
+                <div class="hrn-table-scroll">
+                    <table class="hrn-table">
+                        <thead>
+                            <tr>
+                                <th>Proses</th>
+                                <th>WT</th>
+                                <th>BT</th>
+                                <th>RR = (WT + BT) / BT</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+
+        for (const c of log.candidates) {
+            html += `
+                <tr>
+                    <td>${c.id}</td>
+                    <td>${c.waiting}</td>
+                    <td>${c.bt}</td>
+                    <td>${c.ratio.toFixed(2)}</td>
+                </tr>
+            `;
+        }
+
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+                <p>Dipilih: <strong>${log.selected}</strong> (RR tertinggi)</p>
+            </div>
+        `;
+    });
+
+    hrnLogs.innerHTML = html;
+}
+
+// ==========================================
+// 14. MENJALANKAN PERHITUNGAN
 // ==========================================
 
 function calculateScheduling() {
     try {
         message.textContent = "";
+        hrnLogs.innerHTML = "";
 
         const processes = getProcesses();
         const selected = algorithm.value;
@@ -476,6 +595,10 @@ function calculateScheduling() {
             chart = runSJF(processes);
         } else if (selected === "srtf") {
             chart = runSRTF(processes);
+        } else if (selected === "hrn") {
+            const logs = [];
+            chart = runHRN(processes, logs);
+            displayHRNLogs(logs);
         } else if (selected === "rr") {
             const tq = Number(quantum.value);
 
@@ -502,7 +625,7 @@ function calculateScheduling() {
 }
 
 // ==========================================
-// 13. EVENT LISTENER
+// 15. EVENT LISTENER
 // ==========================================
 
 generateBtn.addEventListener("click", generateInputs);
@@ -515,517 +638,3 @@ algorithm.addEventListener("change", () => {
 
 // Input awal otomatis ditampilkan
 generateInputs();
-
-function runHRN(processes) {
-    let currentTime = 0;
-    let completed = 0;
-
-    let gantt = [];
-    let results = [];
-    let logs = [];
-
-    // Salin data proses agar data asli tidak berubah
-    let data = processes.map((p, index) => ({
-        id: p.id,
-        arrivalTime: Number(p.arrivalTime),
-        burstTime: Number(p.burstTime),
-        index: index,
-        isCompleted: false
-    }));
-
-    while (completed < data.length) {
-
-        // Cari proses yang sudah tiba
-        let readyQueue = data.filter(p =>
-            !p.isCompleted &&
-            p.arrivalTime <= currentTime
-        );
-
-        // Jika belum ada proses yang datang
-        if (readyQueue.length === 0) {
-
-            let nextArrival = Math.min(
-                ...data
-                    .filter(p => !p.isCompleted)
-                    .map(p => p.arrivalTime)
-            );
-
-            gantt.push({
-                id: "IDLE",
-                start: currentTime,
-                end: nextArrival
-            });
-
-            currentTime = nextArrival;
-            continue;
-        }
-
-        // Hitung Response Ratio setiap kandidat
-        let candidates = readyQueue.map(p => {
-
-            let waitingTime = currentTime - p.arrivalTime;
-
-            let responseRatio =
-                (waitingTime + p.burstTime) / p.burstTime;
-
-            return {
-                ...p,
-                waitingTime,
-                responseRatio
-            };
-        });
-
-        // Pilih Response Ratio tertinggi
-        candidates.sort((a, b) => {
-
-            if (Math.abs(
-                b.responseRatio - a.responseRatio
-            ) > 1e-9) {
-                return b.responseRatio - a.responseRatio;
-            }
-
-            if (a.arrivalTime !== b.arrivalTime) {
-                return a.arrivalTime - b.arrivalTime;
-            }
-
-            return a.index - b.index;
-        });
-
-        let selected = candidates[0];
-
-        // Catat proses yang dipilih
-        logs.push({
-            time: currentTime,
-            candidates: candidates.map(p => ({
-                id: p.id,
-                waitingTime: p.waitingTime,
-                burstTime: p.burstTime,
-                responseRatio: p.responseRatio
-            })),
-            selected: selected.id
-        });
-
-        // Eksekusi proses sampai selesai
-        let startTime = currentTime;
-
-        let completionTime =
-            startTime + selected.burstTime;
-
-        let turnaroundTime =
-            completionTime - selected.arrivalTime;
-
-        let waitingTime =
-            turnaroundTime - selected.burstTime;
-
-        let responseTime =
-            startTime - selected.arrivalTime;
-
-        // Simpan hasil perhitungan
-        results.push({
-            id: selected.id,
-            arrivalTime: selected.arrivalTime,
-            burstTime: selected.burstTime,
-            startTime,
-            completionTime,
-            turnaroundTime,
-            waitingTime,
-            responseTime
-        });
-
-        // Simpan Gantt Chart
-        gantt.push({
-            id: selected.id,
-            start: startTime,
-            end: completionTime
-        });
-
-        selected.isCompleted = true;
-
-        currentTime = completionTime;
-        completed++;
-    }
-
-    // Hitung rata-rata
-    let totalWT = results.reduce(
-        (sum, p) => sum + p.waitingTime, 0
-    );
-
-    let totalTAT = results.reduce(
-        (sum, p) => sum + p.turnaroundTime, 0
-    );
-
-    let totalRT = results.reduce(
-        (sum, p) => sum + p.responseTime, 0
-    );
-
-    let totalBurst = data.reduce(
-        (sum, p) => sum + p.burstTime, 0
-    );
-
-    let totalTime = currentTime;
-
-    let averages = {
-        averageWT: totalWT / results.length,
-        averageTAT: totalTAT / results.length,
-        averageRT: totalRT / results.length,
-        throughput: results.length / totalTime,
-        cpuUtilization: (totalBurst / totalTime) * 100
-    };
-
-    return {
-        gantt,
-        results,
-        logs,
-        averages,
-        totalTime
-    };
-}
-
-function runHRN(processes) {
-    let currentTime = 0;
-    let completed = 0;
-
-    const gantt = [];
-    const results = [];
-    const logs = [];
-
-    // Membaca dan memeriksa data proses
-    const data = processes.map((p, index) => ({
-        id: String(p.id || `P${index + 1}`),
-        arrivalTime: Number(p.arrivalTime ?? p.at),
-        burstTime: Number(p.burstTime ?? p.bt),
-        index,
-        isCompleted: false
-    }));
-
-    if (data.length === 0) {
-        throw new Error("Masukkan minimal satu proses.");
-    }
-
-    for (const p of data) {
-        if (
-            !Number.isFinite(p.arrivalTime) ||
-            p.arrivalTime < 0 ||
-            !Number.isFinite(p.burstTime) ||
-            p.burstTime <= 0
-        ) {
-            throw new Error("AT harus >= 0 dan BT harus lebih dari 0.");
-        }
-    }
-
-    // Jalankan proses sampai semuanya selesai
-    while (completed < data.length) {
-
-        // Cari proses yang sudah tiba
-        const readyQueue = data.filter(p =>
-            !p.isCompleted &&
-            p.arrivalTime <= currentTime
-        );
-
-        // Jika belum ada proses yang tiba, CPU menganggur
-        if (readyQueue.length === 0) {
-            const nextArrival = Math.min(
-                ...data
-                    .filter(p => !p.isCompleted)
-                    .map(p => p.arrivalTime)
-            );
-
-            gantt.push({
-                id: "IDLE",
-                start: currentTime,
-                end: nextArrival
-            });
-
-            currentTime = nextArrival;
-            continue;
-        }
-
-        // Hitung Waiting Time dan Response Ratio
-        const candidates = readyQueue.map(p => {
-            const waitingTime = currentTime - p.arrivalTime;
-
-            const responseRatio =
-                (waitingTime + p.burstTime) / p.burstTime;
-
-            return {
-                ...p,
-                waitingTime,
-                responseRatio
-            };
-        });
-
-        // Pilih RR tertinggi
-        candidates.sort((a, b) => {
-            if (Math.abs(a.responseRatio - b.responseRatio) > 1e-9) {
-                return b.responseRatio - a.responseRatio;
-            }
-
-            // Jika RR sama, pilih AT lebih awal
-            if (a.arrivalTime !== b.arrivalTime) {
-                return a.arrivalTime - b.arrivalTime;
-            }
-
-            return a.index - b.index;
-        });
-
-        const selected = candidates[0];
-
-        // Simpan langkah perhitungan RR
-        logs.push({
-            time: currentTime,
-            candidates: candidates.map(p => ({
-                id: p.id,
-                waitingTime: p.waitingTime,
-                burstTime: p.burstTime,
-                responseRatio: p.responseRatio
-            })),
-            selected: selected.id
-        });
-
-        // HRN bersifat non-preemptive:
-        // proses berjalan sampai selesai
-        const startTime = currentTime;
-        const completionTime = startTime + selected.burstTime;
-
-        const turnaroundTime =
-            completionTime - selected.arrivalTime;
-
-        const waitingTime =
-            turnaroundTime - selected.burstTime;
-
-        const responseTime =
-            startTime - selected.arrivalTime;
-
-        // Simpan hasil proses
-        results.push({
-            id: selected.id,
-            arrivalTime: selected.arrivalTime,
-            burstTime: selected.burstTime,
-            startTime,
-            completionTime,
-            turnaroundTime,
-            waitingTime,
-            responseTime
-        });
-
-        // Simpan blok Gantt Chart
-        gantt.push({
-            id: selected.id,
-            start: startTime,
-            end: completionTime
-        });
-
-        selected.isCompleted = true;
-        currentTime = completionTime;
-        completed++;
-    }
-
-    // Menghitung total
-    const totalWT = results.reduce(
-        (sum, p) => sum + p.waitingTime, 0
-    );
-
-    const totalTAT = results.reduce(
-        (sum, p) => sum + p.turnaroundTime, 0
-    );
-
-    const totalRT = results.reduce(
-        (sum, p) => sum + p.responseTime, 0
-    );
-
-    const totalAT = data.reduce(
-        (sum, p) => sum + p.arrivalTime, 0
-    );
-
-    const totalBT = data.reduce(
-        (sum, p) => sum + p.burstTime, 0
-    );
-
-    const totalST = results.reduce(
-        (sum, p) => sum + p.startTime, 0
-    );
-
-    const totalCT = results.reduce(
-        (sum, p) => sum + p.completionTime, 0
-    );
-
-    const totalTime = currentTime;
-
-    // Rata-rata
-    const averages = {
-        averageAT: totalAT / results.length,
-        averageBT: totalBT / results.length,
-        averageST: totalST / results.length,
-        averageCT: totalCT / results.length,
-        averageWT: totalWT / results.length,
-        averageTAT: totalTAT / results.length,
-        averageRT: totalRT / results.length,
-
-        throughput: results.length / totalTime,
-
-        cpuUtilization: (totalBT / totalTime) * 100
-    };
-
-    return {
-        gantt,
-        results,
-        logs,
-        averages,
-        totalTime
-    };
-}
-
-function renderHRN(output) {
-    const ganttChart = document.getElementById("ganttChart");
-    const resultsContainer = document.getElementById("results");
-    const averagesContainer = document.getElementById("averages");
-    const logsContainer = document.getElementById("hrnLogs");
-
-    const { gantt, results, logs, averages, totalTime } = output;
-
-    // Format angka
-    const fmt = value =>
-        Number(value).toFixed(2).replace(/\.00$/, "");
-
-    const safe = value =>
-        String(value).replace(/[&<>"']/g, char => ({
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&#39;"
-        })[char]);
-
-    // 1. GANTT CHART
-    const colors = [
-        "#2563eb", "#0d9488", "#7c3aed",
-        "#d97706", "#db2777", "#0891b2"
-    ];
-
-    const pixelsPerUnit = 64;
-
-    ganttChart.innerHTML = `
-        <div class="hrn-gantt-scroll">
-            <div class="hrn-gantt-track">
-                ${gantt.map((item, index) => {
-                    const duration = item.end - item.start;
-                    const color = item.id === "IDLE"
-                        ? "#64748b"
-                        : colors[index % colors.length];
-
-                    return `
-                        <div class="hrn-gantt-block"
-                             style="
-                                width: ${duration * pixelsPerUnit}px;
-                                background-color: ${color};
-                             ">
-                            <strong>${safe(item.id)}</strong>
-                            <span>${fmt(item.start)} - ${fmt(item.end)}</span>
-                        </div>
-                    `;
-                }).join("")}
-            </div>
-        </div>
-        <p class="hrn-caption">
-            Gantt Chart HRN Non-Preemptive
-        </p>
-    `;
-
-    // 2. TABEL HASIL PERHITUNGAN
-    resultsContainer.innerHTML = `
-        <div class="hrn-table-scroll">
-            <table class="hrn-table">
-                <thead>
-                    <tr>
-                        <th>Proses</th>
-                        <th>AT</th>
-                        <th>BT</th>
-                        <th>ST</th>
-                        <th>CT</th>
-                        <th>TAT</th>
-                        <th>WT</th>
-                        <th>RT</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${results.map(p => `
-                        <tr>
-                            <td>${safe(p.id)}</td>
-                            <td>${fmt(p.arrivalTime)}</td>
-                            <td>${fmt(p.burstTime)}</td>
-                            <td>${fmt(p.startTime)}</td>
-                            <td>${fmt(p.completionTime)}</td>
-                            <td>${fmt(p.turnaroundTime)}</td>
-                            <td>${fmt(p.waitingTime)}</td>
-                            <td>${fmt(p.responseTime)}</td>
-                        </tr>
-                    `).join("")}
-                </tbody>
-            </table>
-        </div>
-    `;
-
-    // 3. RATA-RATA DAN PERFORMA
-    const metrics = [
-        ["Rata-rata AT", averages.averageAT],
-        ["Rata-rata BT", averages.averageBT],
-        ["Rata-rata ST", averages.averageST],
-        ["Rata-rata CT", averages.averageCT],
-        ["Rata-rata TAT", averages.averageTAT],
-        ["Rata-rata WT", averages.averageWT],
-        ["Rata-rata RT", averages.averageRT],
-        ["Total waktu", totalTime],
-        ["Throughput", averages.throughput.toFixed(3)],
-        ["CPU Utilization", averages.cpuUtilization.toFixed(2) + "%"]
-    ];
-
-    averagesContainer.innerHTML = `
-        <div class="hrn-average-grid">
-            ${metrics.map(([label, value]) => `
-                <div class="hrn-metric">
-                    <span>${safe(label)}</span>
-                    <strong>${safe(value)}</strong>
-                </div>
-            `).join("")}
-        </div>
-    `;
-
-    // 4. LANGKAH PERHITUNGAN RESPONSE RATIO
-    logsContainer.innerHTML = `
-        <h3>Langkah Perhitungan Response Ratio</h3>
-
-        ${logs.map((log, index) => `
-            <div class="hrn-log-card">
-                <h4>Langkah ${index + 1} - Waktu ${fmt(log.time)}</h4>
-
-                <div class="hrn-table-scroll">
-                    <table class="hrn-table">
-                        <thead>
-                            <tr>
-                                <th>Proses</th>
-                                <th>Waiting Time</th>
-                                <th>Burst Time</th>
-                                <th>Response Ratio</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${log.candidates.map(p => `
-                                <tr>
-                                    <td>${safe(p.id)}</td>
-                                    <td>${fmt(p.waitingTime)}</td>
-                                    <td>${fmt(p.burstTime)}</td>
-                                    <td>${fmt(p.responseRatio)}</td>
-                                </tr>
-                            `).join("")}
-                        </tbody>
-                    </table>
-                </div>
-
-                <p>
-                    Proses terpilih:
-                    <strong>${safe(log.selected)}</strong>
-                </p>
-            </div>
-        `).join("")}
-    `;
-}
